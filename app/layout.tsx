@@ -5,7 +5,7 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: "Wear Chimsol | Fashion in Harare",
   description: "Shop Wear Chimsol online. Fashion, easy checkout and WhatsApp support in Harare, Zimbabwe.",
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://major-five-xi.vercel.app/"),
   openGraph: { title: "Wear Chimsol", description: "Shop Wear Chimsol online.", type: "website" },
   twitter: { card: "summary_large_image", title: "Wear Chimsol", description: "Shop Wear Chimsol online." },
   verification: { google: "" }
