@@ -3,6 +3,16 @@ import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
   try {
+    const resetToken = req.headers.get("x-admin-reset-token");
+    const expectedToken = process.env.ADMIN_RESET_TOKEN;
+
+    if (!expectedToken || resetToken !== expectedToken) {
+      return NextResponse.json(
+        { error: "Unauthorized." },
+        { status: 401 }
+      );
+    }
+
     const { password } = await req.json();
 
     if (!password || typeof password !== "string") {
@@ -37,13 +47,9 @@ export async function POST(req: Request) {
       },
     });
 
-    const userId = "d0e4c783-0777-4d4d-a2b0-8d54a0978b15";
-
     const { error } = await supabase.auth.admin.updateUserById(
-      userId,
-      {
-        password,
-      }
+      "d0e4c783-0777-4d4d-a2b0-8d54a0978b15",
+      { password }
     );
 
     if (error) {
@@ -57,7 +63,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      message: "Password updated successfully.",
     });
   } catch (error) {
     console.error("Password reset route error:", error);
