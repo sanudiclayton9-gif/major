@@ -1,6 +1,9 @@
+
+
 import { NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
+export const dynamic = "force-dynamic";
 
 async function verifyAdmin() {
   const supabase = await createServerClient();

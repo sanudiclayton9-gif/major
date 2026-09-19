@@ -5,23 +5,35 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData();
 
-    const reference = formData.get("reference")?.toString();
-    const status = formData.get("status")?.toString();
+    const reference = formData
+      .get("reference")
+      ?.toString();
+
+    const status = formData
+      .get("status")
+      ?.toString();
+
     const paynowReference = formData
       .get("paynowreference")
       ?.toString();
 
     if (!reference) {
-      return new NextResponse("Missing payment reference.", {
-        status: 400,
-      });
+      return new NextResponse(
+        "Missing payment reference.",
+        { status: 400 }
+      );
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
+    const supabaseUrl =
+      process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+    const supabaseSecretKey =
+      process.env.SUPABASE_SECRET_KEY;
 
     if (!supabaseUrl || !supabaseSecretKey) {
-      console.error("Missing Supabase server configuration.");
+      console.error(
+        "Missing Supabase server configuration."
+      );
 
       return new NextResponse(
         "Server configuration error.",
@@ -31,7 +43,14 @@ export async function POST(request: Request) {
 
     const supabase = createClient(
       supabaseUrl,
-      supabaseSecretKey
+      supabaseSecretKey,
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
+      }
     );
 
     let paymentStatus = "pending";
@@ -44,17 +63,27 @@ export async function POST(request: Request) {
       paymentStatus = "cancelled";
     }
 
+    console.log("Paynow callback:", {
+      reference,
+      status,
+      paynowReference,
+    });
+
+    // IMPORTANT:
+    // Keep our WC-XXXXXXXX reference because it is
+    // also the public tracking URL.
     const { error } = await supabase
       .from("orders")
       .update({
         payment_status: paymentStatus,
-        paynow_reference:
-          paynowReference || reference,
       })
       .eq("paynow_reference", reference);
 
     if (error) {
-      console.error("Order update error:", error);
+      console.error(
+        "Order update error:",
+        error
+      );
 
       return new NextResponse(
         "Could not update order.",
@@ -66,11 +95,15 @@ export async function POST(request: Request) {
       status: 200,
     });
   } catch (error) {
-    console.error("Paynow result error:", error);
+    console.error(
+      "Paynow result error:",
+      error
+    );
 
     return NextResponse.json(
       {
-        error: "Could not process Paynow result.",
+        error:
+          "Could not process Paynow result.",
       },
       { status: 500 }
     );

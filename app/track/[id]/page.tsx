@@ -15,16 +15,30 @@ export default async function TrackPage({
 
   const supabase = createClient(
     supabaseUrl,
-    supabaseSecretKey
+    supabaseSecretKey,
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    }
   );
 
   const { data: order, error } = await supabase
     .from("orders")
     .select("*")
     .eq("paynow_reference", params.id)
-    .single();
+    .maybeSingle();
 
-  if (error || !order) {
+  if (error) {
+    console.error("Tracking order lookup error:", error);
+
+    throw new Error(
+      "There was a problem loading this order."
+    );
+  }
+
+  if (!order) {
     notFound();
   }
 
@@ -44,7 +58,9 @@ export default async function TrackPage({
         </h1>
 
         <div className="mt-8 rounded-2xl bg-slate-100 p-5">
-          <p className="font-bold">Payment status</p>
+          <p className="font-bold">
+            Payment status
+          </p>
 
           <p className="mt-2 text-lg font-semibold capitalize">
             {order.payment_status}
@@ -103,7 +119,6 @@ export default async function TrackPage({
 
                     <p className="text-sm text-slate-500">
                       Quantity: {item.quantity}
-
                       {item.size &&
                         ` • Size: ${item.size}`}
                     </p>
@@ -134,7 +149,9 @@ export default async function TrackPage({
 
         <p className="mt-6 text-sm text-slate-500">
           Order placed:{" "}
-          {new Date(order.created_at).toLocaleString()}
+          {new Date(
+            order.created_at
+          ).toLocaleString()}
         </p>
       </div>
     </main>
