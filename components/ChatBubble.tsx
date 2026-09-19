@@ -1,0 +1,7 @@
+ "use client";
+import { useState } from "react";
+export default function ChatBubble() {
+  const [open,setOpen]=useState(false); const [message,setMessage]=useState(""); const [reply,setReply]=useState("");
+  async function send(){ if(!message.trim()) return; setReply("Thinking…"); const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message})}); setReply(r.ok ? await r.text() : "Please WhatsApp us on 0775178065."); }
+  return <div className="fixed bottom-5 right-5 z-50">{open && <div className="mb-3 w-80 rounded-3xl border bg-white p-4 shadow-2xl"><div className="mb-3 font-black">Wear Chimsol AI</div><div className="min-h-20 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600">{reply || "Ask me about products, sizes or stock."}</div><div className="mt-3 flex gap-2"><input value={message} onChange={e=>setMessage(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} className="min-w-0 flex-1 rounded-xl border px-3 py-2" placeholder="Ask anything…" /><button onClick={send} className="rounded-xl bg-slate-950 px-3 text-white">Send</button></div></div>}<button onClick={()=>setOpen(!open)} className="rounded-full bg-violet-600 px-5 py-3 font-bold text-white shadow-lg">{open?"Close":"Ask AI ✨"}</button></div>
+}
