@@ -99,15 +99,21 @@ export async function POST(request: Request) {
     return new NextResponse("OK", {
       status: 200,
     });
-  } catch (error) {
-    console.error(
-      "Paynow result error:",
-      error
-    );
+} catch (error) {
+  console.error("========== PAYNOW RESULT ERROR ==========");
+  console.error(error);
+  console.error(
+    error instanceof Error
+      ? error.stack
+      : "Unknown error"
+  );
+  console.error("==========================================");
 
-    return new NextResponse(
-      "Could not process Paynow result.",
-      { status: 500 }
-    );
-  }
+  return new NextResponse(
+    error instanceof Error
+      ? `Paynow result error: ${error.message}`
+      : "Paynow result error: Unknown error",
+    { status: 500 }
+  );
+}
 }
