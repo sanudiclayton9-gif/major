@@ -1,81 +1,103 @@
 import { NextResponse } from "next/server";
-import { Paynow } from "paynow";
 import { createClient } from "@supabase/supabase-js";
+import { Paynow } from "paynow";
+
+export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const formData = await request.formData();
 
-    const {
-      amount,
-      phone,
+    const reference = formData.get("reference")?.toString();
+    const status = formData.get("status")?.toString();
+    const paynowReference = formData
+      .get("paynowreference")
+      ?.toString();
+    const pollUrl = formData.get("pollurl")?.toString();
+
+    console.log("========== PAYNOW CALLBACK ==========");
+    console.log({
       reference,
-      description,
-      customerName,
-      customerEmail,
-      items,
-    } = body;
-
-    if (!amount || Number(amount) <= 0) {
-      return NextResponse.json(
-        { error: "Invalid payment amount." },
-        { status: 400 }
-      );
-    }
-
-    if (!phone) {
-      return NextResponse.json(
-        { error: "Customer phone number is required." },
-        { status: 400 }
-      );
-    }
-
-    if (!customerName) {
-      return NextResponse.json(
-        { error: "Customer name is required." },
-        { status: 400 }
-      );
-    }
+      status,
+      paynowReference,
+      pollUrl,
+    });
+    console.log("=====================================");
 
     if (!reference) {
-      return NextResponse.json(
-        { error: "Payment reference is required." },
-        { status: 400 }
-      );
-    }
+      console.error("Paynow callback missing reference.");
 
-    if (!Array.isArray(items) || items.length === 0) {
-      return NextResponse.json(
-        { error: "Order items are required." },
+      return new NextResponse(
+        "Missing payment reference.",
         { status: 400 }
       );
     }
 
     const integrationId = process.env.PAYNOW_ID;
     const integrationKey = process.env.PAYNOW_KEY;
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
+    const supabaseUrl =
+      process.env.NEXT_PUBLIC_SUPABASE_URL;
 
-    if (!integrationId || !integrationKey) {
-      return NextResponse.json(
-        { error: "Paynow is not configured." },
+    const supabaseSecretKey =
+      process.env.SUPABASE_SECRET_KEY;
+
+    if (
+      !integrationId ||
+      !integrationKey ||
+      !supabaseUrl ||
+      !supabaseSecretKey
+    ) {
+      console.error(
+        "Missing Paynow or Supabase configuration."
+      );
+
+      return new NextResponse(
+        "Server configuration error.",
         { status: 500 }
       );
     }
 
-    if (!siteUrl) {
-      return NextResponse.json(
-        { error: "NEXT_PUBLIC_SITE_URL is missing." },
-        { status: 500 }
-      );
-    }
+    /*
+     * Paynow recommends validating the hash on every
+     * status update. We first read all fields from the
+     * callback and verify that the message is genuine.
+     */
+    const callbackData: Record<string, string> = {};
 
-    if (!supabaseUrl || !supabaseSecretKey) {
-      return NextResponse.json(
-        { error: "Supabase server configuration is missing." },
-        { status: 500 }
+    formData.forEach((value, key) => {
+      callbackData[key] = value.toString();
+    });
+
+    const paynow = new Paynow(
+      integrationId,
+      integrationKey
+    );
+
+    try {
+      const validHash = paynow.verifyHash(
+        callbackData
+      );
+
+      if (!validHash) {
+        console.error(
+          "Paynow callback hash validation failed."
+        );
+
+        return new NextResponse(
+          "Invalid Paynow callback.",
+          { status: 400 }
+        );
+      }
+    } catch (hashError) {
+      console.error(
+        "Paynow callback hash verification error:",
+        hashError
+      );
+
+      return new NextResponse(
+        "Invalid Paynow callback.",
+        { status: 400 }
       );
     }
 
@@ -91,87 +113,73 @@ export async function POST(request: Request) {
       }
     );
 
-    // Create the order BEFORE sending the customer to Paynow.
-    const { error: orderError } = await supabase
+    let paymentStatus = "pending";
+
+    switch (status) {
+      case "Paid":
+        paymentStatus = "paid";
+        break;
+
+      case "Awaiting Delivery":
+        paymentStatus = "paid";
+        break;
+
+      case "Cancelled":
+        paymentStatus = "cancelled";
+        break;
+
+      case "Failed":
+        paymentStatus = "failed";
+        break;
+
+      case "Refunded":
+        paymentStatus = "refunded";
+        break;
+
+      case "Disputed":
+        paymentStatus = "disputed";
+        break;
+
+      default:
+        paymentStatus = "pending";
+    }
+
+    const { error } = await supabase
       .from("orders")
-      .insert({
-        customer_name: customerName,
-        customer_email: customerEmail || null,
-        customer_phone: phone,
-        items,
-        total: Number(amount),
-        payment_status: "pending",
-        paynow_reference: reference,
-      });
+      .update({
+        payment_status: paymentStatus,
+      })
+      .eq("paynow_reference", reference);
 
-    if (orderError) {
-      console.error("Order creation error:", orderError);
+    if (error) {
+      console.error(
+        "Supabase order update error:",
+        error
+      );
 
-      return NextResponse.json(
-        {
-          error:
-            "Could not create your order. Please try again.",
-        },
+      return new NextResponse(
+        "Could not update order.",
         { status: 500 }
       );
     }
 
-    const paynow = new Paynow(
-      integrationId,
-      integrationKey
+    console.log(
+      `Order ${reference} updated to ${paymentStatus}`
     );
 
-    paynow.resultUrl = `${siteUrl}/api/paynow/result`;
-
-    // Keep the SAME Wear Chimsol reference for tracking.
-    paynow.returnUrl = `${siteUrl}/track/${reference}`;
-
-    const payment = paynow.createPayment(reference);
-
-    payment.add(
-      description || "Wear Chimsol order",
-      Number(amount)
-    );
-
-    const response = await paynow.send(payment);
-
-    if (!response.success) {
-      console.error(
-        "Paynow payment creation failed:",
-        response.error
-      );
-
-      // Mark the order as failed if Paynow could not start.
-      await supabase
-        .from("orders")
-        .update({
-          payment_status: "failed",
-        })
-        .eq("paynow_reference", reference);
-
-      return NextResponse.json(
-        {
-          error:
-            response.error ||
-            "Paynow could not create the payment.",
-        },
-        { status: 400 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      redirectUrl: response.redirectUrl,
-      pollUrl: response.pollUrl,
-      reference,
+    return new NextResponse("OK", {
+      status: 200,
     });
   } catch (error) {
-    console.error("Paynow error:", error);
+    console.error(
+      "Paynow result error:",
+      error
+    );
 
     return NextResponse.json(
       {
         error:
-          "Something went wrong while creating the Paynow payment.",
+          "Could not process Paynow result.",
       },
       { status: 500 }
     );
