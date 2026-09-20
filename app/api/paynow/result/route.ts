@@ -1,66 +1,51 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { Paynow } from "paynow";
 
 export const dynamic = "force-dynamic";
+
+function parsePaynowBody(body: string) {
+  const params = new URLSearchParams(body);
+
+  return {
+    reference: params.get("reference"),
+    amount: params.get("amount"),
+    paynowreference: params.get("paynowreference"),
+    pollurl: params.get("pollurl"),
+    status: params.get("status"),
+    hash: params.get("hash"),
+  };
+}
 
 export async function POST(request: Request) {
   try {
     const rawBody = await request.text();
 
     console.log("========== PAYNOW CALLBACK ==========");
-    console.log(rawBody);
+    console.log("Content-Type:", request.headers.get("content-type"));
+    console.log("Raw body:", rawBody);
     console.log("=====================================");
 
     if (!rawBody) {
-      return new NextResponse("Empty Paynow response.", {
-        status: 400,
-      });
-    }
-
-    const integrationId = process.env.PAYNOW_ID;
-    const integrationKey = process.env.PAYNOW_KEY;
-    const supabaseUrl =
-      process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseSecretKey =
-      process.env.SUPABASE_SECRET_KEY;
-
-    if (
-      !integrationId ||
-      !integrationKey ||
-      !supabaseUrl ||
-      !supabaseSecretKey
-    ) {
-      console.error(
-        "Missing Paynow or Supabase configuration."
-      );
-
       return new NextResponse(
-        "Server configuration error.",
-        { status: 500 }
+        "Empty Paynow response.",
+        { status: 400 }
       );
     }
 
-    const paynow = new Paynow(
-      integrationId,
-      integrationKey
-    );
-
-    // Let Paynow's official Node SDK parse the
-    // status-update message.
-    const result = paynow.parseStatusUpdate(rawBody);
+    const result = parsePaynowBody(rawBody);
 
     console.log("Parsed Paynow result:", {
       reference: result.reference,
-      status: result.status,
+      amount: result.amount,
       paynowreference: result.paynowreference,
+      status: result.status,
       pollurl: result.pollurl,
-      error: result.error,
+      hasHash: Boolean(result.hash),
     });
 
     if (!result.reference) {
       console.error(
-        "Paynow callback did not contain a reference."
+        "Paynow callback is missing reference."
       );
 
       return new NextResponse(
@@ -69,18 +54,20 @@ export async function POST(request: Request) {
       );
     }
 
-    // Verify that the status update genuinely came
-    // from Paynow.
-    const values = paynow.parseQuery(rawBody);
+    const supabaseUrl =
+      process.env.NEXT_PUBLIC_SUPABASE_URL;
 
-    if (!paynow.verifyHash(values)) {
+    const supabaseSecretKey =
+      process.env.SUPABASE_SECRET_KEY;
+
+    if (!supabaseUrl || !supabaseSecretKey) {
       console.error(
-        "Paynow callback hash validation failed."
+        "Missing Supabase server configuration."
       );
 
       return new NextResponse(
-        "Invalid Paynow callback.",
-        { status: 400 }
+        "Server configuration error.",
+        { status: 500 }
       );
     }
 
@@ -98,41 +85,26 @@ export async function POST(request: Request) {
 
     let paymentStatus = "pending";
 
-    switch (result.status) {
-      case "Paid":
-        paymentStatus = "paid";
-        break;
-
-      case "Awaiting Delivery":
-        paymentStatus = "paid";
-        break;
-
-      case "Cancelled":
-        paymentStatus = "cancelled";
-        break;
-
-      case "Failed":
-        paymentStatus = "failed";
-        break;
-
-      case "Refunded":
-        paymentStatus = "refunded";
-        break;
-
-      case "Disputed":
-        paymentStatus = "disputed";
-        break;
-
-      default:
-        paymentStatus = "pending";
+    if (result.status === "Paid") {
+      paymentStatus = "paid";
+    } else if (result.status === "Failed") {
+      paymentStatus = "failed";
+    } else if (result.status === "Cancelled") {
+      paymentStatus = "cancelled";
+    } else if (result.status === "Refunded") {
+      paymentStatus = "refunded";
     }
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("orders")
       .update({
         payment_status: paymentStatus,
       })
-      .eq("paynow_reference", result.reference);
+      .eq("paynow_reference", result.reference)
+      .select(
+        "id, paynow_reference, payment_status"
+      )
+      .maybeSingle();
 
     if (error) {
       console.error(
@@ -147,10 +119,10 @@ export async function POST(request: Request) {
     }
 
     console.log(
-      `Order ${result.reference} updated to ${paymentStatus}`
+      "Order successfully updated:",
+      data
     );
 
-    // Paynow does not require a special response body.
     return new NextResponse("OK", {
       status: 200,
     });
