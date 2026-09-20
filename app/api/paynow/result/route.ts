@@ -1,21 +1,25 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
 
-    const reference = formData
-      .get("reference")
-      ?.toString();
-
-    const status = formData
-      .get("status")
-      ?.toString();
-
+    const reference = formData.get("reference")?.toString();
+    const status = formData.get("status")?.toString();
     const paynowReference = formData
       .get("paynowreference")
       ?.toString();
+
+    console.log("========== PAYNOW CALLBACK ==========");
+    console.log({
+      reference,
+      status,
+      paynowReference,
+    });
+    console.log("=====================================");
 
     if (!reference) {
       return new NextResponse(
@@ -61,27 +65,23 @@ export async function POST(request: Request) {
       paymentStatus = "failed";
     } else if (status === "Cancelled") {
       paymentStatus = "cancelled";
+    } else if (status === "Refunded") {
+      paymentStatus = "refunded";
     }
 
-    console.log("Paynow callback:", {
-      reference,
-      status,
-      paynowReference,
-    });
-
-    // IMPORTANT:
-    // Keep our WC-XXXXXXXX reference because it is
-    // also the public tracking URL.
-    const { error } = await supabase
-      .from("orders")
-      .update({
-        payment_status: paymentStatus,
-      })
-      .eq("paynow_reference", reference);
+    const { data: updatedOrder, error } =
+      await supabase
+        .from("orders")
+        .update({
+          payment_status: paymentStatus,
+        })
+        .eq("paynow_reference", reference)
+        .select("id, paynow_reference, payment_status")
+        .maybeSingle();
 
     if (error) {
       console.error(
-        "Order update error:",
+        "Supabase order update error:",
         error
       );
 
@@ -90,6 +90,11 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
+
+    console.log(
+      "Updated order:",
+      updatedOrder
+    );
 
     return new NextResponse("OK", {
       status: 200,
@@ -100,11 +105,8 @@ export async function POST(request: Request) {
       error
     );
 
-    return NextResponse.json(
-      {
-        error:
-          "Could not process Paynow result.",
-      },
+    return new NextResponse(
+      "Could not process Paynow result.",
       { status: 500 }
     );
   }
