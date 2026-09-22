@@ -55,10 +55,37 @@ export async function POST(req: NextRequest) {
     await supabaseAdmin.from("orders").update({ status: "cancelled" }).eq("id", order.id);
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
+  // Normalize the phone to an international format Paynow expects. Strip
+  // non-digits, convert leading 0 to 263 (Zimbabwe country code) where
+  // appropriate. We keep the original for logging.
+  const originalPhone = customerPhone;
+  let normalizedPhone = String(customerPhone || "").replace(/[^0-9+]/g, "");
+  if (normalizedPhone.startsWith("+")) normalizedPhone = normalizedPhone.slice(1);
+  if (normalizedPhone.startsWith("0")) {
+    // 0xxxx -> 263xxxx
+    normalizedPhone = `263${normalizedPhone.slice(1)}`;
+  }
 
-  const payment = paynow.createPayment(order.id, `${customerPhone}@wearchimsol.co.zw`);
+  const payment = paynow.createPayment(order.id, `${originalPhone}@wearchimsol.co.zw`);
   for (const item of items) {
     payment.add(`${item.name}${item.size ? ` (${item.size})` : ""}`, item.price * item.qty);
+  }
+
+  // Log helpful, non-secret diagnostics for troubleshooting signature/hash
+  // problems. Do NOT log the integration key itself.
+  try {
+    // eslint-disable-next-line no-console
+    console.log('[paynow] preparing payment', {
+      orderId: order.id,
+      customerPhone: originalPhone,
+      normalizedPhone,
+      items: items.map((i: any) => ({ name: i.name, qty: i.qty, price: i.price })),
+      total,
+      resultUrl: paynow.resultUrl,
+      returnUrl: paynow.returnUrl,
+    });
+  } catch (e) {
+    // ignore logging errors
   }
 
   try {

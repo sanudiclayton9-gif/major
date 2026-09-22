@@ -11,8 +11,17 @@ const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://major-five-xi.ver
 // We accept either naming so a deployment that used the SDK's own names still works.
 // Values are trimmed because a stray space or newline pasted into a hosting
 // dashboard's env var UI is a silent cause of "Hashes do not match!".
-const PAYNOW_ID = (process.env.PAYNOW_ID || process.env.PAYNOW_INTEGRATION_ID)?.trim();
-const PAYNOW_KEY = (process.env.PAYNOW_KEY || process.env.PAYNOW_INTEGRATION_KEY)?.trim();
+// Normalize and remove invisible/control characters which may be pasted into
+// hosting dashboards and silently break signature computations ("Hashes do
+// not match!"). We keep visible characters and trim surrounding whitespace.
+function normalizeEnv(value?: string) {
+  if (!value) return undefined;
+  // remove C0/C1 control characters and BOM, keep printable ASCII/UTF-8
+  return value.replace(/[\u0000-\u001F\u007F-\u009F\uFEFF]/g, "").trim();
+}
+
+const PAYNOW_ID = normalizeEnv(process.env.PAYNOW_ID || process.env.PAYNOW_INTEGRATION_ID);
+const PAYNOW_KEY = normalizeEnv(process.env.PAYNOW_KEY || process.env.PAYNOW_INTEGRATION_KEY);
 
 /**
  * Paynow's SDK swallows every network/HTTP error inside its own `.catch()`, logs
@@ -51,8 +60,17 @@ export async function callPaynow<T>(label: string, fn: () => Promise<T>): Promis
 export function getPaynow(orderId?: string) {
   if (!PAYNOW_ID || !PAYNOW_KEY) {
     throw new Error(
-      "Paynow credentials are missing. Set PAYNOW_ID and PAYNOW_KEY (or PAYNOW_INTEGRATION_ID and PAYNOW_INTEGRATION_KEY) in your environment, then redeploy."
+      "Paynow credentials are missing or invalid. Ensure PAYNOW_ID and PAYNOW_KEY (or PAYNOW_INTEGRATION_ID and PAYNOW_INTEGRATION_KEY) are set in your environment and re-deploy."
     );
+  }
+
+  // Helpful non-secret diagnostics for server logs: lengths indicate stray
+  // characters (do not log the actual keys).
+  try {
+    // eslint-disable-next-line no-console
+    console.log(`[paynow] PAYNOW_ID length=${String(PAYNOW_ID.length)} PAYNOW_KEY length=${String(PAYNOW_KEY.length)}`);
+  } catch (e) {
+    // ignore logging errors
   }
 
   const paynow = new Paynow(PAYNOW_ID, PAYNOW_KEY);
