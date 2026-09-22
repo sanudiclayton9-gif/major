@@ -1,65 +1,37 @@
-import { createServerClient } from "@supabase/ssr";
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({
-    request,
-  });
+export function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(
-            ({ name, value }) => {
-              request.cookies.set(name, value);
-            }
-          );
-
-          response = NextResponse.next({
-            request,
-          });
-
-          cookiesToSet.forEach(
-            ({ name, value, options }) => {
-              response.cookies.set(
-                name,
-                value,
-                options
-              );
-            }
-          );
-        },
-      },
-    }
-  );
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const pathname = request.nextUrl.pathname;
-
+  // Never gate the login page or the login/logout API routes themselves.
   if (
-    pathname.startsWith("/admin") &&
-    pathname !== "/admin/login" &&
-    !user
+    pathname === "/admin/login" ||
+    pathname === "/api/admin/login" ||
+    pathname === "/api/admin/logout"
   ) {
-    return NextResponse.redirect(
-      new URL("/admin/login", request.url)
-    );
+    return NextResponse.next();
   }
 
-  return response;
+  const cookie = req.cookies.get("admin_auth")?.value;
+  const authed = cookie && cookie === process.env.ADMIN_PASSWORD;
+
+  if (pathname.startsWith("/api/admin")) {
+    if (!authed) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    return NextResponse.next();
+  }
+
+  if (pathname.startsWith("/admin")) {
+    if (!authed) {
+      return NextResponse.redirect(new URL("/admin/login", req.url));
+    }
+    return NextResponse.next();
+  }
+
+  return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/admin/:path*"],
+  matcher: ["/admin/:path*", "/api/admin/:path*"],
 };

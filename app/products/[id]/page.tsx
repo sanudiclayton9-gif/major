@@ -1,91 +1,100 @@
-import { getProducts } from "@/lib/products";
-import { formatPrice } from "@/lib/utils";
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import AddToCartButton from "./AddToCartButton";
+import { getProduct } from "@/lib/products";
+import AddToCart from "@/components/AddToCart";
+import ProductComments from "@/components/ProductComments";
+import { BUSINESS_NAME, waLink } from "@/lib/constants";
 
-export default async function ProductPage({
-  params,
-}: {
-  params: { id: string };
-}) {
-  const products = await getProducts();
+export const revalidate = 0;
 
-  const p = products.find(
-    (x) => x.id === Number(params.id)
-  );
+export async function generateMetadata({ params }: { params: { id: string } }) {
+  const product = await getProduct(params.id);
+  if (!product) return {};
+  return {
+    title: `${product.name} | ${BUSINESS_NAME}`,
+    description: product.description,
+    openGraph: {
+      title: product.name,
+      description: product.description,
+      images: product.images?.[0] ? [product.images[0]] : undefined,
+    },
+  };
+}
 
-  if (!p) notFound();
+export default async function ProductPage({ params }: { params: { id: string } }) {
+  const product = await getProduct(params.id);
+  if (!product) notFound();
 
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Product",
-    name: p.name,
-    description: p.description,
-    image: p.images,
+    name: product.name,
+    description: product.description,
+    image: product.images,
     offers: {
       "@type": "Offer",
       priceCurrency: "USD",
-      price: p.price,
+      price: product.price,
       availability:
-        p.stock > 0
+        product.stock > 0
           ? "https://schema.org/InStock"
           : "https://schema.org/OutOfStock",
     },
   };
 
   return (
-    <main className="mx-auto grid max-w-6xl gap-10 px-5 py-14 md:grid-cols-2">
-      <div className="rounded-3xl bg-slate-100 p-4">
-        <img
-          src={p.images?.[0] || "/placeholder.svg"}
-          alt={p.name}
-          className="aspect-square w-full rounded-2xl object-cover"
-        />
-      </div>
-
-      <div className="py-6">
-        <p className="text-sm font-bold uppercase tracking-widest text-violet-600">
-          Wear Chimsol
-        </p>
-
-        <h1 className="mt-2 text-4xl font-black">
-          {p.name}
-        </h1>
-
-        <p className="mt-4 text-2xl font-black">
-          {formatPrice(p.price)}
-        </p>
-
-        <p className="mt-5 leading-7 text-slate-600">
-          {p.description}
-        </p>
-
-        <p className="mt-5 font-semibold">
-          {p.stock > 0
-            ? `${p.stock} in stock`
-            : "Out of stock"}
-        </p>
-
-        <AddToCartButton product={p} />
-
-        <div className="mt-6">
-          <a
-            href={`https://wa.me/263775178065?text=${encodeURIComponent(
-              `Hi Wear Chimsol, I'm interested in ${p.name}.`
-            )}`}
-            className="rounded-full border border-slate-300 px-6 py-3 font-bold"
-          >
-            WhatsApp
-          </a>
-        </div>
-      </div>
-
+    <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{
-          __html: JSON.stringify(jsonLd),
-        }}
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-    </main>
+
+      <header className="border-b border-black/5">
+        <nav className="max-w-6xl mx-auto flex items-center justify-between px-6 py-4">
+          <Link href="/" className="font-display font-semibold text-lg">
+            {BUSINESS_NAME}
+          </Link>
+          <Link href="/cart" className="text-sm font-semibold">
+            Cart
+          </Link>
+        </nav>
+      </header>
+
+      <main className="max-w-5xl mx-auto px-6 py-12 grid md:grid-cols-2 gap-10">
+        <div className="glass rounded-2xl overflow-hidden aspect-[4/5]">
+          {product.images?.[0] && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={product.images[0]}
+              alt={product.name}
+              className="w-full h-full object-cover"
+            />
+          )}
+        </div>
+
+        <div>
+          <h1 className="font-display text-3xl font-semibold mb-2">{product.name}</h1>
+          <p className="font-display text-2xl text-wine font-semibold mb-4">
+            ${product.price.toFixed(0)}
+          </p>
+          <p className="text-ink-soft mb-6">{product.description}</p>
+
+          <AddToCart product={product} />
+
+          <a
+            href={waLink(
+              `Hi ${BUSINESS_NAME}, I'd like to ask about "${product.name}" ($${product.price}).`
+            )}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-4 inline-block text-sm font-semibold text-[#25d366]"
+          >
+            Or ask about it on WhatsApp →
+          </a>
+
+          <ProductComments productId={product.id} />
+        </div>
+      </main>
+    </>
   );
 }

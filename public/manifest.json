@@ -1,0 +1,16 @@
+{
+  "name": "Wear Chimsol",
+  "short_name": "Wear Chimsol",
+  "description": "Custom tailoring and made-to-order designs in Mabelreign, Harare.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#faf7f2",
+  "theme_color": "#7a2e3a",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

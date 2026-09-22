@@ -1,187 +1,94 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { Paynow } from "paynow";
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { getPaynow } from "@/lib/paynow";
+import { OrderItem } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const {
+    items,
+    customerPhone,
+    customerName,
+    measurements,
+  }: {
+    items: OrderItem[];
+    customerPhone: string;
+    customerName?: string;
+    measurements?: string;
+  } = body;
 
-export async function POST(request: Request) {
-  try {
-    const formData = await request.formData();
-
-    const reference = formData.get("reference")?.toString();
-    const status = formData.get("status")?.toString();
-    const paynowReference = formData
-      .get("paynowreference")
-      ?.toString();
-    const pollUrl = formData.get("pollurl")?.toString();
-
-    console.log("========== PAYNOW CALLBACK ==========");
-    console.log({
-      reference,
-      status,
-      paynowReference,
-      pollUrl,
-    });
-    console.log("=====================================");
-
-    if (!reference) {
-      console.error("Paynow callback missing reference.");
-
-      return new NextResponse(
-        "Missing payment reference.",
-        { status: 400 }
-      );
-    }
-
-    const integrationId = process.env.PAYNOW_ID;
-    const integrationKey = process.env.PAYNOW_KEY;
-
-    const supabaseUrl =
-      process.env.NEXT_PUBLIC_SUPABASE_URL;
-
-    const supabaseSecretKey =
-      process.env.SUPABASE_SECRET_KEY;
-
-    if (
-      !integrationId ||
-      !integrationKey ||
-      !supabaseUrl ||
-      !supabaseSecretKey
-    ) {
-      console.error(
-        "Missing Paynow or Supabase configuration."
-      );
-
-      return new NextResponse(
-        "Server configuration error.",
-        { status: 500 }
-      );
-    }
-
-    /*
-     * Paynow recommends validating the hash on every
-     * status update. We first read all fields from the
-     * callback and verify that the message is genuine.
-     */
-    const callbackData: Record<string, string> = {};
-
-    formData.forEach((value, key) => {
-      callbackData[key] = value.toString();
-    });
-
-    const paynow = new Paynow(
-      integrationId,
-      integrationKey
-    );
-
-    try {
-      const validHash = paynow.verifyHash(
-        callbackData
-      );
-
-      if (!validHash) {
-        console.error(
-          "Paynow callback hash validation failed."
-        );
-
-        return new NextResponse(
-          "Invalid Paynow callback.",
-          { status: 400 }
-        );
-      }
-    } catch (hashError) {
-      console.error(
-        "Paynow callback hash verification error:",
-        hashError
-      );
-
-      return new NextResponse(
-        "Invalid Paynow callback.",
-        { status: 400 }
-      );
-    }
-
-    const supabase = createClient(
-      supabaseUrl,
-      supabaseSecretKey,
-      {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-          detectSessionInUrl: false,
-        },
-      }
-    );
-
-    let paymentStatus = "pending";
-
-    switch (status) {
-      case "Paid":
-        paymentStatus = "paid";
-        break;
-
-      case "Awaiting Delivery":
-        paymentStatus = "paid";
-        break;
-
-      case "Cancelled":
-        paymentStatus = "cancelled";
-        break;
-
-      case "Failed":
-        paymentStatus = "failed";
-        break;
-
-      case "Refunded":
-        paymentStatus = "refunded";
-        break;
-
-      case "Disputed":
-        paymentStatus = "disputed";
-        break;
-
-      default:
-        paymentStatus = "pending";
-    }
-
-    const { error } = await supabase
-      .from("orders")
-      .update({
-        payment_status: paymentStatus,
-      })
-      .eq("paynow_reference", reference);
-
-    if (error) {
-      console.error(
-        "Supabase order update error:",
-        error
-      );
-
-      return new NextResponse(
-        "Could not update order.",
-        { status: 500 }
-      );
-    }
-
-    console.log(
-      `Order ${reference} updated to ${paymentStatus}`
-    );
-
-    return new NextResponse("OK", {
-      status: 200,
-    });
-  } catch (error) {
-    console.error(
-      "Paynow result error:",
-      error
-    );
-
+  if (!items?.length || !customerPhone) {
     return NextResponse.json(
-      {
-        error:
-          "Could not process Paynow result.",
-      },
+      { error: "items and customerPhone are required" },
+      { status: 400 }
+    );
+  }
+
+  const total = items.reduce((sum, i) => sum + i.price * i.qty, 0);
+
+  // 1. Create the order first, status pending.
+  const { data: order, error: orderError } = await supabaseAdmin
+    .from("orders")
+    .insert({
+      items,
+      total,
+      status: "pending",
+      customer_phone: customerPhone,
+      customer_name: customerName ?? null,
+      measurements: measurements ?? null,
+    })
+    .select()
+    .single();
+
+  if (orderError || !order) {
+    return NextResponse.json(
+      { error: orderError?.message ?? "Could not create order" },
       { status: 500 }
     );
+  }
+
+  // 2. Build the Paynow payment using the order id as the reference.
+  const paynow = getPaynow(order.id);
+  const payment = paynow.createPayment(order.id, `${customerPhone}@wearchimsol.co.zw`);
+  for (const item of items) {
+    payment.add(`${item.name}${item.size ? ` (${item.size})` : ""}`, item.price * item.qty);
+  }
+
+  try {
+    const response = await paynow.sendMobile(payment, customerPhone, "ecocash");
+    if (!response) {
+  await supabaseAdmin.from("orders").update({ status: "cancelled" }).eq("id", order.id);
+  return NextResponse.json(
+    { error: "Paynow rejected the request — check that PAYNOW_ID and PAYNOW_KEY match and the dev server was restarted after editing .env.local." },
+    { status: 502 }
+  );
+}
+
+    if (!response.success) {
+      await supabaseAdmin
+        .from("orders")
+        .update({ status: "cancelled" })
+        .eq("id", order.id);
+      return NextResponse.json(
+        { error: response.error || "Payment could not be started" },
+        { status: 502 }
+      );
+    }
+
+    await supabaseAdmin
+      .from("orders")
+      .update({ paynow_poll_url: response.pollUrl })
+      .eq("id", order.id);
+
+    return NextResponse.json({
+      orderId: order.id,
+      instructions: response.instructions,
+    });
+  } catch (e: any) {
+    await supabaseAdmin
+      .from("orders")
+      .update({ status: "cancelled" })
+      .eq("id", order.id);
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

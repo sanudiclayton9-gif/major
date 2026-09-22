@@ -1,159 +1,103 @@
-import { createClient } from "@supabase/supabase-js";
-import { notFound } from "next/navigation";
+"use client";
 
-export default async function TrackPage({
-  params,
-}: {
-  params: { id: string };
-}) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { BUSINESS_NAME, waLink } from "@/lib/constants";
 
-  if (!supabaseUrl || !supabaseSecretKey) {
-    throw new Error("Supabase server configuration is missing.");
-  }
+const STATUS_TEXT: Record<string, string> = {
+  pending: "Waiting for your EcoCash confirmation...",
+  paid: "Payment confirmed! We're preparing your order.",
+  delivered: "Delivered. Thank you for ordering with us!",
+  cancelled: "This payment was cancelled or failed.",
+};
 
-  const supabase = createClient(
-    supabaseUrl,
-    supabaseSecretKey,
-    {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
+export default function TrackPage({ params }: { params: { id: string } }) {
+  const [status, setStatus] = useState("pending");
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    let attempts = 0;
+
+    async function poll() {
+      try {
+        const res = await fetch(`/api/paynow/status?orderId=${params.id}`);
+        const data = await res.json();
+        if (!active) return;
+        if (data.status) setStatus(data.status);
+      } catch {
+        // ignore transient errors, keep polling
+      }
+      attempts++;
+      if (active && status === "pending" && attempts < 40) {
+        setTimeout(poll, 4000);
+      } else {
+        setChecking(false);
+      }
     }
-  );
 
-  const { data: order, error } = await supabase
-    .from("orders")
-    .select("*")
-    .eq("paynow_reference", params.id)
-    .maybeSingle();
-
-  if (error) {
-    console.error("Tracking order lookup error:", error);
-
-    throw new Error(
-      "There was a problem loading this order."
-    );
-  }
-
-  if (!order) {
-    notFound();
-  }
-
-  const items = Array.isArray(order.items)
-    ? order.items
-    : [];
+    poll();
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.id]);
 
   return (
-    <main className="mx-auto max-w-3xl px-5 py-16">
-      <div className="glass rounded-3xl p-8">
-        <p className="text-sm font-bold uppercase tracking-widest text-violet-600">
-          Order tracking
-        </p>
+    <>
+      <header className="border-b border-black/5">
+        <nav className="max-w-6xl mx-auto flex items-center justify-between px-6 py-4">
+          <Link href="/" className="font-display font-semibold text-lg">
+            {BUSINESS_NAME}
+          </Link>
+        </nav>
+      </header>
 
-        <h1 className="mt-2 text-4xl font-black">
-          Order {order.paynow_reference}
-        </h1>
+      <main className="max-w-md mx-auto px-6 py-16 text-center">
+        <div className="glass rounded-2xl p-8">
+          <p className="text-sm text-ink-soft mb-2">Order #{params.id.slice(0, 8)}</p>
+          <h1 className="font-display text-2xl font-semibold mb-4">
+            {status === "paid" && "✅ Payment confirmed"}
+            {status === "pending" && "⏳ Waiting for confirmation"}
+            {status === "cancelled" && "❌ Payment not completed"}
+            {status === "delivered" && "📦 Delivered"}
+          </h1>
+          <p className="text-ink-soft mb-6">{STATUS_TEXT[status] ?? "Checking status..."}</p>
 
-        <div className="mt-8 rounded-2xl bg-slate-100 p-5">
-          <p className="font-bold">
-            Payment status
-          </p>
-
-          <p className="mt-2 text-lg font-semibold capitalize">
-            {order.payment_status}
-          </p>
-        </div>
-
-        <div className="mt-6">
-          <h2 className="text-xl font-black">
-            Customer
-          </h2>
-
-          <div className="mt-3 rounded-2xl border bg-white p-5">
-            <p>
-              <strong>Name:</strong>{" "}
-              {order.customer_name}
+          {status === "pending" && checking && (
+            <p className="text-sm text-ink-soft">
+              Enter your EcoCash PIN on your phone if you haven't already.
+              This page updates automatically.
             </p>
+          )}
 
-            {order.customer_email && (
-              <p className="mt-2">
-                <strong>Email:</strong>{" "}
-                {order.customer_email}
-              </p>
-            )}
+          {status === "cancelled" && (
+            <a
+              href={waLink(
+                `Hi ${BUSINESS_NAME}, my order #${params.id.slice(0, 8)} payment didn't go through. Can you help?`
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block mt-2 bg-[#25d366] text-white font-semibold px-5 py-2 rounded-full text-sm"
+            >
+              Message us on WhatsApp
+            </a>
+          )}
 
-            <p className="mt-2">
-              <strong>Phone:</strong>{" "}
-              {order.customer_phone}
-            </p>
-          </div>
+          {status === "paid" && (
+            <a
+              href={waLink(
+                `Hi ${BUSINESS_NAME}, I just paid for order #${params.id.slice(0, 8)}.`
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block mt-2 bg-[#25d366] text-white font-semibold px-5 py-2 rounded-full text-sm"
+            >
+              Confirm with us on WhatsApp
+            </a>
+          )}
         </div>
-
-        <div className="mt-6">
-          <h2 className="text-xl font-black">
-            Items
-          </h2>
-
-          <div className="mt-3 space-y-3">
-            {items.map(
-              (
-                item: {
-                  name?: string;
-                  quantity?: number;
-                  price?: number;
-                  size?: string | null;
-                },
-                index: number
-              ) => (
-                <div
-                  key={index}
-                  className="flex justify-between rounded-2xl border bg-white p-4"
-                >
-                  <div>
-                    <p className="font-bold">
-                      {item.name}
-                    </p>
-
-                    <p className="text-sm text-slate-500">
-                      Quantity: {item.quantity}
-                      {item.size &&
-                        ` • Size: ${item.size}`}
-                    </p>
-                  </div>
-
-                  <p className="font-bold">
-                    $
-                    {(
-                      Number(item.price || 0) *
-                      Number(item.quantity || 0)
-                    ).toFixed(2)}
-                  </p>
-                </div>
-              )
-            )}
-          </div>
-        </div>
-
-        <div className="mt-6 rounded-2xl bg-slate-950 p-5 text-white">
-          <div className="flex justify-between text-lg">
-            <span>Total</span>
-
-            <strong>
-              ${Number(order.total).toFixed(2)}
-            </strong>
-          </div>
-        </div>
-
-        <p className="mt-6 text-sm text-slate-500">
-          Order placed:{" "}
-          {new Date(
-            order.created_at
-          ).toLocaleString()}
-        </p>
-      </div>
-    </main>
+      </main>
+    </>
   );
 }

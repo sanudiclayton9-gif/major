@@ -1,6 +1,6 @@
 {
   "name": "wear-chimsol",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,23 +9,21 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@ai-sdk/google": "^1.2.22",
-    "@supabase/ssr": "^0.12.7",
-    "@supabase/supabase-js": "^2.116.0",
-    "ai": "^4.3.19",
-    "lucide-react": "^0.468.0",
-    "next": "14.2.35",
-    "paynow": "^2.2.2",
+    "next": "14.2.5",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "@supabase/supabase-js": "^2.45.0",
+    "paynow": "^1.1.10",
+    "ai": "^3.3.20",
+    "@ai-sdk/google": "^0.0.44"
   },
   "devDependencies": {
-    "@types/node": "^20.17.10",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.49",
-    "tailwindcss": "^3.4.16",
-    "typescript": "^5.7.2"
+    "@types/node": "^20.14.9",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.5.3",
+    "tailwindcss": "^3.4.7",
+    "postcss": "^8.4.40",
+    "autoprefixer": "^10.4.19"
   }
 }

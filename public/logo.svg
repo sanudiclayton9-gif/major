@@ -1,0 +1,11 @@
+<svg width="440" height="140" viewBox="0 0 440 140" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="70" cy="70" r="60" fill="#7a2e3a"/>
+  <circle cx="70" cy="70" r="52" fill="none" stroke="#c69a3b" stroke-width="1.2" stroke-dasharray="3 4"/>
+  <text x="70" y="93" text-anchor="middle" font-family="Georgia, serif" font-weight="700" font-style="italic" font-size="58" fill="#faf7f2">W</text>
+  <path d="M40 100 Q70 114 100 100" stroke="#c69a3b" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+  <circle cx="40" cy="100" r="2.6" fill="#c69a3b"/>
+  <circle cx="100" cy="100" r="2.6" fill="#c69a3b"/>
+
+  <text x="150" y="65" font-family="Georgia, serif" font-weight="600" font-size="34" fill="#241c1f">Wear</text>
+  <text x="150" y="102" font-family="Georgia, serif" font-weight="600" font-style="italic" font-size="34" fill="#7a2e3a">Chimsol</text>
+</svg>

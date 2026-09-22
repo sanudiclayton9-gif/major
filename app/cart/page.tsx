@@ -1,313 +1,156 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import {
-  getCart,
-  removeFromCart,
-  updateCartQuantity,
-  getCartTotal,
-  type CartItem,
-} from "@/lib/cart";
+import { useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCart } from "@/components/CartContext";
+import { BUSINESS_NAME } from "@/lib/constants";
 
 export default function CartPage() {
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const { items, removeItem, total, clear } = useCart();
+  const router = useRouter();
   const [phone, setPhone] = useState("");
-  const [customerName, setCustomerName] = useState("");
-  const [customerEmail, setCustomerEmail] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [name, setName] = useState("");
+  const [measurements, setMeasurements] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [instructions, setInstructions] = useState("");
 
-  useEffect(() => {
-    setCart(getCart());
-  }, []);
-
-  const total = getCartTotal(cart);
-
-  function handleRemove(productId: number, size?: string) {
-    setCart(removeFromCart(productId, size));
-  }
-
-  function handleQuantityChange(
-    productId: number,
-    quantity: number,
-    size?: string
-  ) {
-    setCart(
-      updateCartQuantity(productId, quantity, size)
-    );
-  }
-
-  async function handlePaynow() {
+  async function handleCheckout(e: React.FormEvent) {
+    e.preventDefault();
     setError("");
-
-    if (cart.length === 0) {
-      setError("Your cart is empty.");
-      return;
-    }
-
-    if (!customerName.trim()) {
-      setError("Please enter your name.");
-      return;
-    }
-
     if (!phone.trim()) {
-      setError("Please enter your phone number.");
+      setError("Enter the EcoCash number to charge.");
       return;
     }
-
-    setLoading(true);
-
+    setSubmitting(true);
     try {
-      const reference = "WC-" + Date.now();
-
-      const items = cart.map((item) => ({
-        productId: item.product.id,
-        name: item.product.name,
-        quantity: item.quantity,
-        price: item.product.price,
-        size: item.size || null,
-      }));
-
-      const response = await fetch("/api/paynow", {
+      const res = await fetch("/api/paynow", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          amount: total,
-          phone,
-          reference,
-          description: "Wear Chimsol order",
-          customerName,
-          customerEmail,
           items,
+          customerPhone: phone.trim(),
+          customerName: name.trim() || undefined,
+          measurements: measurements.trim() || undefined,
         }),
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.error ||
-            "Unable to start Paynow payment."
-        );
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Something went wrong starting the payment.");
+        setSubmitting(false);
+        return;
       }
-
-      if (!data.redirectUrl) {
-        throw new Error(
-          "Paynow did not return a payment URL."
-        );
-      }
-
-      window.location.href = data.redirectUrl;
-    } catch (err) {
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Something went wrong.");
-      }
-
-      setLoading(false);
+      setInstructions(data.instructions || "Check your phone to confirm the EcoCash payment.");
+      clear();
+      setTimeout(() => router.push(`/track/${data.orderId}`), 2500);
+    } catch {
+      setError("Could not reach the server. Try again.");
+      setSubmitting(false);
     }
   }
 
   return (
-    <main className="mx-auto max-w-4xl px-5 py-16">
-      <div className="glass rounded-3xl p-8">
-        <p className="text-sm font-bold uppercase tracking-widest text-violet-600">
-          Shopping Cart
-        </p>
+    <>
+      <header className="border-b border-black/5">
+        <nav className="max-w-6xl mx-auto flex items-center justify-between px-6 py-4">
+          <Link href="/" className="font-display font-semibold text-lg">
+            {BUSINESS_NAME}
+          </Link>
+        </nav>
+      </header>
 
-        <h1 className="mt-2 text-4xl font-black">
-          Your cart
-        </h1>
+      <main className="max-w-2xl mx-auto px-6 py-12">
+        <h1 className="font-display text-2xl font-semibold mb-6">Your cart</h1>
 
-        {cart.length === 0 ? (
-          <div className="mt-8 rounded-2xl bg-slate-100 p-8 text-center">
-            <p className="text-lg font-semibold">
-              Your cart is empty.
-            </p>
-
-            <a
-              href="/"
-              className="mt-5 inline-block rounded-full bg-slate-950 px-6 py-3 font-bold text-white"
-            >
-              Continue Shopping
-            </a>
+        {instructions ? (
+          <div className="glass rounded-2xl p-6 text-center">
+            <p className="font-semibold mb-2">Almost done!</p>
+            <p className="text-ink-soft">{instructions}</p>
+            <p className="text-ink-soft text-sm mt-3">Taking you to your order status...</p>
           </div>
+        ) : items.length === 0 ? (
+          <p className="text-ink-soft">
+            Your cart is empty. <Link href="/" className="text-wine font-semibold">Browse designs →</Link>
+          </p>
         ) : (
           <>
-            <div className="mt-8 space-y-4">
-              {cart.map((item) => (
-                <div
-                  key={`${item.product.id}-${item.size}`}
-                  className="flex flex-col gap-4 rounded-2xl border bg-white p-5 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="flex items-center gap-4">
-                    <img
-                      src={
-                        item.product.images?.[0] ||
-                        "/placeholder.svg"
-                      }
-                      alt={item.product.name}
-                      className="h-20 w-20 rounded-xl object-cover"
-                    />
-
-                    <div>
-                      <h2 className="font-bold">
-                        {item.product.name}
-                      </h2>
-
-                      <p className="text-sm text-slate-500">
-                        ${item.product.price.toFixed(2)}
-                      </p>
-
-                      {item.size && (
-                        <p className="text-sm text-slate-500">
-                          Size: {item.size}
-                        </p>
-                      )}
-                    </div>
+            <div className="space-y-3 mb-6">
+              {items.map((item, i) => (
+                <div key={i} className="glass rounded-xl p-4 flex justify-between items-center">
+                  <div>
+                    <p className="font-semibold">{item.name}</p>
+                    <p className="text-sm text-ink-soft">
+                      {item.size ? `${item.size} · ` : ""}Qty {item.qty}
+                    </p>
                   </div>
-
                   <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleQuantityChange(
-                          item.product.id,
-                          item.quantity - 1,
-                          item.size
-                        )
-                      }
-                      className="h-9 w-9 rounded-full border font-bold"
-                    >
-                      −
-                    </button>
-
-                    <span className="min-w-6 text-center font-bold">
-                      {item.quantity}
+                    <span className="font-display font-semibold">
+                      ${(item.price * item.qty).toFixed(0)}
                     </span>
-
                     <button
-                      type="button"
-                      onClick={() =>
-                        handleQuantityChange(
-                          item.product.id,
-                          Math.min(
-                            item.product.stock,
-                            item.quantity + 1
-                          ),
-                          item.size
-                        )
-                      }
-                      disabled={
-                        item.quantity >= item.product.stock
-                      }
-                      className="h-9 w-9 rounded-full border font-bold disabled:opacity-40"
+                      onClick={() => removeItem(i)}
+                      className="text-ink-soft text-sm"
+                      aria-label={`Remove ${item.name}`}
                     >
-                      +
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleRemove(
-                          item.product.id,
-                          item.size
-                        )
-                      }
-                      className="ml-3 text-sm font-semibold text-red-600"
-                    >
-                      Remove
+                      ✕
                     </button>
                   </div>
                 </div>
               ))}
             </div>
 
-            <div className="mt-8 rounded-2xl bg-slate-100 p-5">
-              <div className="flex justify-between text-lg">
-                <span>Order total</span>
-
-                <strong>
-                  ${total.toFixed(2)}
-                </strong>
-              </div>
+            <div className="flex justify-between font-display text-xl font-semibold border-t border-black/10 pt-4 mb-6">
+              <span>Total</span>
+              <span>${total.toFixed(0)}</span>
             </div>
 
-            <div className="mt-8">
-              <h2 className="text-2xl font-black">
-                Checkout
-              </h2>
-
-              <div className="mt-5">
-                <label className="text-sm font-bold">
-                  Customer name
+            <form onSubmit={handleCheckout} className="space-y-3">
+              <div>
+                <label className="block text-sm font-semibold mb-1">
+                  EcoCash number to charge
                 </label>
-
                 <input
-                  type="text"
-                  value={customerName}
-                  onChange={(e) =>
-                    setCustomerName(e.target.value)
-                  }
-                  className="mt-2 w-full rounded-xl border bg-white px-4 py-3 outline-none"
-                  placeholder="Your name"
-                />
-              </div>
-
-              <div className="mt-4">
-                <label className="text-sm font-bold">
-                  Customer email
-                </label>
-
-                <input
-                  type="email"
-                  value={customerEmail}
-                  onChange={(e) =>
-                    setCustomerEmail(e.target.value)
-                  }
-                  className="mt-2 w-full rounded-xl border bg-white px-4 py-3 outline-none"
-                  placeholder="you@example.com"
-                />
-              </div>
-
-              <div className="mt-4">
-                <label className="text-sm font-bold">
-                  Customer phone
-                </label>
-
-                <input
-                  type="tel"
                   value={phone}
-                  onChange={(e) =>
-                    setPhone(e.target.value)
-                  }
-                  className="mt-2 w-full rounded-xl border bg-white px-4 py-3 outline-none"
-                  placeholder="077..."
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="07XXXXXXXX"
+                  className="w-full rounded-lg px-3 py-2 bg-white/70 border border-black/10"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-1">Your name (optional)</label>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full rounded-lg px-3 py-2 bg-white/70 border border-black/10"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-1">
+                  Measurements (optional)
+                </label>
+                <textarea
+                  value={measurements}
+                  onChange={(e) => setMeasurements(e.target.value)}
+                  placeholder="e.g. Bust 34in, Waist 28in, Hips 38in"
+                  className="w-full rounded-lg px-3 py-2 bg-white/70 border border-black/10"
                 />
               </div>
 
-              {error && (
-                <div className="mt-4 rounded-xl bg-red-50 p-4 text-sm text-red-600">
-                  {error}
-                </div>
-              )}
+              {error && <p className="text-wine text-sm">{error}</p>}
 
               <button
-                onClick={handlePaynow}
-                disabled={loading}
-                className="mt-6 w-full rounded-full bg-slate-950 px-6 py-3 font-bold text-white disabled:opacity-50"
+                type="submit"
+                disabled={submitting}
+                className="w-full bg-wine text-white font-semibold py-3 rounded-full"
               >
-                {loading
-                  ? "Connecting to Paynow..."
-                  : `Proceed to Paynow — $${total.toFixed(2)}`}
+                {submitting ? "Starting payment..." : `Pay $${total.toFixed(0)} with EcoCash`}
               </button>
-            </div>
+            </form>
           </>
         )}
-      </div>
-    </main>
+      </main>
+    </>
   );
 }

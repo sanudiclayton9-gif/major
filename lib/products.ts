@@ -1,49 +1,23 @@
-import { supabase } from "./supabase";
-import type { Product } from "./types";
-
-export const demoProducts: Product[] = [
-  {
-    id: 1,
-    name: "Classic Black Tee",
-    price: 18,
-    stock: 12,
-    sizes: ["S", "M", "L", "XL"],
-    images: ["/placeholder.svg"],
-    description: "A clean everyday essential from Wear Chimsol.",
-  },
-  {
-    id: 2,
-    name: "Streetwear Hoodie",
-    price: 35,
-    stock: 7,
-    sizes: ["M", "L", "XL"],
-    images: ["/placeholder.svg"],
-    description: "Comfortable heavyweight hoodie for a relaxed fit.",
-  },
-  {
-    id: 3,
-    name: "Everyday Cargo",
-    price: 32,
-    stock: 5,
-    sizes: ["30", "32", "34", "36"],
-    images: ["/placeholder.svg"],
-    description: "Versatile cargo trousers built for everyday wear.",
-  },
-];
+import { supabase } from "@/lib/supabase";
+import { Product } from "@/lib/types";
 
 export async function getProducts(): Promise<Product[]> {
-  try {
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .order("created_at", { ascending: false });
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .order("created_at", { ascending: false });
 
-    if (error || !data?.length) {
-      return demoProducts;
-    }
+  if (error) throw error;
+  return data ?? [];
+}
 
-    return data as Product[];
-  } catch {
-    return demoProducts;
-  }
+export async function getProduct(id: string): Promise<Product | null> {
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error) return null;
+  return data;
 }

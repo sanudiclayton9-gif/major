@@ -1,148 +1,43 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { getPaynow } from "@/lib/paynow";
 
-export const dynamic = "force-dynamic";
+// Paynow calls this URL directly (server-to-server) once a payment resolves.
+// Rather than trust the incoming form fields (which would require manually
+// re-implementing Paynow's hash verification), we take the order reference
+// from the payload and re-poll Paynow's API ourselves using our integration
+// key - that round trip is what actually proves the payment status, since
+// it's authenticated against Paynow's servers, not the incoming request.
+export async function POST(req: NextRequest) {
+  const form = await req.formData();
+  const reference = form.get("reference")?.toString();
 
-function parsePaynowBody(body: string) {
-  const params = new URLSearchParams(body);
-
-  return {
-    reference: params.get("reference"),
-    amount: params.get("amount"),
-    paynowreference: params.get("paynowreference"),
-    pollurl: params.get("pollurl"),
-    status: params.get("status"),
-    hash: params.get("hash"),
-  };
-}
-
-export async function POST(request: Request) {
-  try {
-    const rawBody = await request.text();
-
-    console.log("========== PAYNOW CALLBACK ==========");
-    console.log("Content-Type:", request.headers.get("content-type"));
-    console.log("Raw body:", rawBody);
-    console.log("=====================================");
-
-    if (!rawBody) {
-      return new NextResponse(
-        "Empty Paynow response.",
-        { status: 400 }
-      );
-    }
-
-    const result = parsePaynowBody(rawBody);
-
-    console.log("Parsed Paynow result:", {
-      reference: result.reference,
-      amount: result.amount,
-      paynowreference: result.paynowreference,
-      status: result.status,
-      pollurl: result.pollurl,
-      hasHash: Boolean(result.hash),
-    });
-
-    if (!result.reference) {
-      console.error(
-        "Paynow callback is missing reference."
-      );
-
-      return new NextResponse(
-        "Missing payment reference.",
-        { status: 400 }
-      );
-    }
-
-    const supabaseUrl =
-      process.env.NEXT_PUBLIC_SUPABASE_URL;
-
-    const supabaseSecretKey =
-      process.env.SUPABASE_SECRET_KEY;
-
-    if (!supabaseUrl || !supabaseSecretKey) {
-      console.error(
-        "Missing Supabase server configuration."
-      );
-
-      return new NextResponse(
-        "Server configuration error.",
-        { status: 500 }
-      );
-    }
-
-    const supabase = createClient(
-      supabaseUrl,
-      supabaseSecretKey,
-      {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-          detectSessionInUrl: false,
-        },
-      }
-    );
-
-    let paymentStatus = "pending";
-
-    if (result.status === "Paid") {
-      paymentStatus = "paid";
-    } else if (result.status === "Failed") {
-      paymentStatus = "failed";
-    } else if (result.status === "Cancelled") {
-      paymentStatus = "cancelled";
-    } else if (result.status === "Refunded") {
-      paymentStatus = "refunded";
-    }
-
-    const { data, error } = await supabase
-      .from("orders")
-      .update({
-        payment_status: paymentStatus,
-      })
-      .eq("paynow_reference", result.reference)
-      .select(
-        "id, paynow_reference, payment_status"
-      )
-      .maybeSingle();
-
-    if (error) {
-      console.error(
-        "Supabase order update error:",
-        error
-      );
-
-      return new NextResponse(
-        "Could not update order.",
-        { status: 500 }
-      );
-    }
-
-    console.log(
-      "Order successfully updated:",
-      data
-    );
-
-    return new NextResponse("OK", {
-      status: 200,
-    });
-  } catch (error) {
-    console.error(
-      "========== PAYNOW RESULT ERROR =========="
-    );
-    console.error(error);
-    console.error(
-      error instanceof Error
-        ? error.stack
-        : "Unknown error"
-    );
-    console.error(
-      "=========================================="
-    );
-
-    return new NextResponse(
-      "Could not process Paynow result.",
-      { status: 500 }
-    );
+  if (!reference) {
+    return new NextResponse("Missing reference", { status: 400 });
   }
+
+  const { data: order } = await supabaseAdmin
+    .from("orders")
+    .select("*")
+    .eq("id", reference)
+    .single();
+
+  if (!order || !order.paynow_poll_url) {
+    return new NextResponse("OK", { status: 200 });
+  }
+
+  if (order.status !== "pending") {
+    return new NextResponse("OK", { status: 200 });
+  }
+
+  const paynow = getPaynow();
+  const pollResult = await paynow.pollTransaction(order.paynow_poll_url);
+
+  if (pollResult.paid()) {
+    await supabaseAdmin.from("orders").update({ status: "paid" }).eq("id", order.id);
+  } else if (pollResult.status === "cancelled" || pollResult.status === "failed") {
+    await supabaseAdmin.from("orders").update({ status: "cancelled" }).eq("id", order.id);
+  }
+
+  return new NextResponse("OK", { status: 200 });
 }
