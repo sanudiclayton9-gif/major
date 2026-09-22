@@ -38,7 +38,7 @@ if (process.env.PAYNOW_DEBUG === "1") {
       return function (options: any, callback?: any) {
         const host = (options && (options.hostname || options.host)) || (typeof options === 'string' ? options : '');
         const shouldLog = typeof host === 'string' && host.includes('paynow');
-        const req = orig.call(this, options, callback);
+        const req = (orig as any)(options, callback);
         if (!shouldLog) return req;
 
         let body = '';
