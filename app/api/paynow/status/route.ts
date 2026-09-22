@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { getPaynow } from "@/lib/paynow";
+import { callPaynow, getPaynow } from "@/lib/paynow";
 
 export async function GET(req: NextRequest) {
   const orderId = req.nextUrl.searchParams.get("orderId");
@@ -27,8 +27,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ status: order.status });
   }
 
-  const paynow = getPaynow();
-  const pollResult = await paynow.pollTransaction(order.paynow_poll_url);
+  let pollResult;
+  try {
+    const paynow = getPaynow();
+    pollResult = await callPaynow("pollTransaction", () =>
+      paynow.pollTransaction(order.paynow_poll_url)
+    );
+  } catch (e: any) {
+    // Transient Paynow/credential problem - leave the order pending so the
+    // customer's next poll (or the Paynow webhook) can resolve it.
+    console.error("[paynow] status poll failed", { orderId, error: e?.message ?? e });
+    return NextResponse.json({ status: "pending" });
+  }
 
   if (pollResult.paid()) {
     await supabaseAdmin.from("orders").update({ status: "paid" }).eq("id", orderId);

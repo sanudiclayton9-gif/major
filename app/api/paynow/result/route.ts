@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { getPaynow } from "@/lib/paynow";
+import { callPaynow, getPaynow } from "@/lib/paynow";
 
 // Paynow calls this URL directly (server-to-server) once a payment resolves.
 // Rather than trust the incoming form fields (which would require manually
@@ -30,8 +30,17 @@ export async function POST(req: NextRequest) {
     return new NextResponse("OK", { status: 200 });
   }
 
-  const paynow = getPaynow();
-  const pollResult = await paynow.pollTransaction(order.paynow_poll_url);
+  let pollResult;
+  try {
+    const paynow = getPaynow();
+    pollResult = await callPaynow("pollTransaction (webhook)", () =>
+      paynow.pollTransaction(order.paynow_poll_url)
+    );
+  } catch (e: any) {
+    console.error("[paynow] webhook poll failed", { orderId: order.id, error: e?.message ?? e });
+    // Return 200 so Paynow doesn't retry-storm us; the order stays pending.
+    return new NextResponse("OK", { status: 200 });
+  }
 
   if (pollResult.paid()) {
     await supabaseAdmin.from("orders").update({ status: "paid" }).eq("id", order.id);

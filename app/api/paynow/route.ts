@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { getPaynow } from "@/lib/paynow";
+import { callPaynow, getPaynow } from "@/lib/paynow";
 import { OrderItem } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
@@ -62,15 +62,23 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const response = await paynow.sendMobile(payment, customerPhone, "ecocash");
+    // callPaynow surfaces the error the SDK would otherwise swallow and turn
+    // into `undefined`, so we can log and report the real reason.
+    const response = await callPaynow("sendMobile", () =>
+      paynow.sendMobile(payment, customerPhone, "ecocash")
+    );
 
-    // The SDK normalises failures into response.success / response.error. A falsy
-    // response means the SDK itself could not process the request at all.
     if (!response) {
-      console.error("[paynow] empty response from sendMobile", { orderId: order.id, customerPhone });
+      console.error("[paynow] sendMobile returned no response", {
+        orderId: order.id,
+        customerPhone,
+      });
       await supabaseAdmin.from("orders").update({ status: "cancelled" }).eq("id", order.id);
       return NextResponse.json(
-        { error: "Could not reach Paynow. Please try again in a moment." },
+        {
+          error:
+            "We couldn't start the payment. Please try again in a moment, or contact us on WhatsApp.",
+        },
         { status: 502 }
       );
     }
@@ -97,10 +105,19 @@ export async function POST(req: NextRequest) {
       instructions: response.instructions,
     });
   } catch (e: any) {
+    // The real reason (DNS failure, timeout, HTTP 4xx/5xx, "Hashes do not
+    // match!") is in this message now that callPaynow surfaces it.
+    console.error("[paynow] sendMobile threw", { orderId: order.id, error: e?.message ?? e });
     await supabaseAdmin
       .from("orders")
       .update({ status: "cancelled" })
       .eq("id", order.id);
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json(
+      {
+        error:
+          "We couldn't reach Paynow. Please try again in a moment, or contact us on WhatsApp.",
+      },
+      { status: 502 }
+    );
   }
 }
