@@ -48,7 +48,14 @@ export async function POST(req: NextRequest) {
   }
 
   // 2. Build the Paynow payment using the order id as the reference.
-  const paynow = getPaynow(order.id);
+  let paynow: ReturnType<typeof getPaynow>;
+  try {
+    paynow = getPaynow(order.id);
+  } catch (e: any) {
+    await supabaseAdmin.from("orders").update({ status: "cancelled" }).eq("id", order.id);
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+
   const payment = paynow.createPayment(order.id, `${customerPhone}@wearchimsol.co.zw`);
   for (const item of items) {
     payment.add(`${item.name}${item.size ? ` (${item.size})` : ""}`, item.price * item.qty);
@@ -56,15 +63,20 @@ export async function POST(req: NextRequest) {
 
   try {
     const response = await paynow.sendMobile(payment, customerPhone, "ecocash");
+
+    // The SDK normalises failures into response.success / response.error. A falsy
+    // response means the SDK itself could not process the request at all.
     if (!response) {
-  await supabaseAdmin.from("orders").update({ status: "cancelled" }).eq("id", order.id);
-  return NextResponse.json(
-    { error: "Paynow rejected the request — check that PAYNOW_ID and PAYNOW_KEY match and the dev server was restarted after editing .env.local." },
-    { status: 502 }
-  );
-}
+      console.error("[paynow] empty response from sendMobile", { orderId: order.id, customerPhone });
+      await supabaseAdmin.from("orders").update({ status: "cancelled" }).eq("id", order.id);
+      return NextResponse.json(
+        { error: "Could not reach Paynow. Please try again in a moment." },
+        { status: 502 }
+      );
+    }
 
     if (!response.success) {
+      console.error("[paynow] sendMobile rejected", { orderId: order.id, error: response.error });
       await supabaseAdmin
         .from("orders")
         .update({ status: "cancelled" })

@@ -5,7 +5,7 @@ import { useState } from "react";
 
 export default function ChatBubble() {
   const [open, setOpen] = useState(false);
-  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
+  const { messages, input, handleInputChange, handleSubmit, isLoading, error } = useChat({
     api: "/api/chat",
   });
 
@@ -42,6 +42,12 @@ export default function ChatBubble() {
             {isLoading && (
               <div className="bg-white/80 text-ink-soft max-w-[85%] px-3 py-2 rounded-xl">
                 Typing...
+              </div>
+            )}
+            {error && !isLoading && (
+              <div className="bg-red-50 text-red-700 max-w-[85%] px-3 py-2 rounded-xl">
+                Sorry, the assistant is unavailable right now. Please message us
+                on WhatsApp instead.
               </div>
             )}
           </div>
