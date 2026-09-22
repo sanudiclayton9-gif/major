@@ -1,4 +1,6 @@
 import { Paynow } from "paynow";
+import https from "https";
+import http from "http";
 
 // Trailing slashes are stripped: without this, a NEXT_PUBLIC_SITE_URL that ends
 // in "/" produces "https://host//api/paynow/result" (double slash), which
@@ -22,6 +24,52 @@ function normalizeEnv(value?: string) {
 
 const PAYNOW_ID = normalizeEnv(process.env.PAYNOW_ID || process.env.PAYNOW_INTEGRATION_ID);
 const PAYNOW_KEY = normalizeEnv(process.env.PAYNOW_KEY || process.env.PAYNOW_INTEGRATION_KEY);
+
+// Optional debugging: when `PAYNOW_DEBUG=1` the runtime will log outgoing
+// HTTP(S) request bodies that target Paynow hosts. This helps inspect the
+// actual payload/hash the SDK sends. Do NOT enable in production for long;
+// it is intended for short troubleshooting only.
+if (process.env.PAYNOW_DEBUG === "1") {
+  try {
+    const origHttpsRequest = https.request;
+    const origHttpRequest = http.request;
+
+    function makeWrapper(orig: typeof https.request | typeof http.request) {
+      return function (options: any, callback?: any) {
+        const host = (options && (options.hostname || options.host)) || (typeof options === 'string' ? options : '');
+        const shouldLog = typeof host === 'string' && host.includes('paynow');
+        const req = orig.call(this, options, callback);
+        if (!shouldLog) return req;
+
+        let body = '';
+        const origWrite = req.write;
+        const origEnd = req.end;
+        req.write = function (chunk: any, encoding?: any, cb?: any) {
+          try { body += chunk?.toString?.() || String(chunk); } catch (e) {}
+          return origWrite.call(req, chunk, encoding, cb);
+        } as any;
+        req.end = function (chunk: any, encoding?: any, cb?: any) {
+          try { if (chunk) body += chunk?.toString?.(); } catch (e) {}
+          try {
+            // redact the actual integration key if present
+            const redacted = body.replace(/(integration_key=)[^&\n\r]*/i, "$1[REDACTED]");
+            // eslint-disable-next-line no-console
+            console.log('[paynow-debug] outgoing request to', host, 'body:', redacted);
+          } catch (e) {}
+          return origEnd.call(req, chunk, encoding, cb);
+        } as any;
+        return req;
+      } as any;
+    }
+
+    https.request = makeWrapper(origHttpsRequest);
+    http.request = makeWrapper(origHttpRequest);
+    // eslint-disable-next-line no-console
+    console.log('[paynow-debug] HTTP(S) request wrapper installed');
+  } catch (e) {
+    // ignore
+  }
+}
 
 /**
  * Paynow's SDK swallows every network/HTTP error inside its own `.catch()`, logs
