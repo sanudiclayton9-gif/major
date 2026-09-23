@@ -198,10 +198,33 @@ function ProductsTab() {
 function OrdersTab() {
   const [orders, setOrders] = useState<Order[]>([]);
 
+  const [loading, setLoading] = useState(false);
+
+  async function loadOrders() {
+    try {
+      setLoading(true);
+      const r = await fetch("/api/admin/orders");
+      const data = await r.json();
+      setOrders(data || []);
+    } catch (e) {
+      // ignore fetch errors, keep previous list
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
-    fetch("/api/admin/orders")
-      .then((r) => r.json())
-      .then(setOrders);
+    let mounted = true;
+    loadOrders();
+    // Poll orders every 5 seconds while the tab is mounted so statuses update.
+    const id = setInterval(() => {
+      if (!mounted) return;
+      loadOrders();
+    }, 5000);
+    return () => {
+      mounted = false;
+      clearInterval(id);
+    };
   }, []);
 
   const statusColor: Record<string, string> = {
@@ -213,7 +236,18 @@ function OrdersTab() {
 
   return (
     <>
-      <h2 className="font-display font-semibold text-lg mb-3">Orders ({orders.length})</h2>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-display font-semibold text-lg">Orders ({orders.length})</h2>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={loadOrders}
+            className="text-sm font-semibold border border-black/10 rounded-lg px-3 py-1.5 bg-white/70"
+            disabled={loading}
+          >
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
+      </div>
       <div className="space-y-3">
         {orders.length === 0 && <p className="text-ink-soft">No orders yet.</p>}
         {orders.map((o) => (
