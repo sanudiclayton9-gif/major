@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const { Paynow } = require('paynow');
+const https = require('https');
+const http = require('http');
 
 function readEnvFile(file) {
   try {
@@ -44,6 +46,46 @@ if (SITE_URL) {
   p.returnUrl = `${SITE_URL}/track/test-order`;
 }
 
+// Local debug: capture outgoing http(s) request bodies when PAYNOW_DEBUG=1
+if (process.env.PAYNOW_DEBUG === '1') {
+  try {
+    const origHttpsRequest = https.request;
+    const origHttpRequest = http.request;
+
+    function makeWrapper(orig) {
+      return function (options, callback) {
+        const host = (options && (options.hostname || options.host)) || (typeof options === 'string' ? options : '');
+        const shouldLog = typeof host === 'string' && host.includes('paynow');
+        const req = orig(options, callback);
+        if (!shouldLog) return req;
+
+        let body = '';
+        const origWrite = req.write.bind(req);
+        const origEnd = req.end.bind(req);
+        req.write = function (chunk, encoding, cb) {
+          try { body += chunk && chunk.toString ? chunk.toString() : String(chunk); } catch (e) {}
+          return origWrite(chunk, encoding, cb);
+        };
+        req.end = function (chunk, encoding, cb) {
+          try { if (chunk) body += chunk && chunk.toString ? chunk.toString() : String(chunk); } catch (e) {}
+          try {
+            const redacted = body.replace(/(integration_key=)[^&\n\r]*/i, "$1[REDACTED]");
+            console.log('[paynow-debug] outgoing request to', host, 'body:', redacted);
+          } catch (e) {}
+          return origEnd(chunk, encoding, cb);
+        };
+        return req;
+      };
+    }
+
+    https.request = makeWrapper(origHttpsRequest);
+    http.request = makeWrapper(origHttpRequest);
+    console.log('[paynow-debug] local HTTP wrapper installed');
+  } catch (e) {
+    // ignore
+  }
+}
+
 async function main() {
   const orderId = `test-${Date.now()}`;
   // mimic the real app: use the phone-as-email pattern it creates
@@ -83,6 +125,9 @@ async function main() {
     console.log = origLog;
     console.error = origErr;
     console.log('Paynow sendMobile response:', res);
+    if (captured) {
+      console.error('Captured SDK output:\n', captured);
+    }
   } catch (e) {
     console.log = origLog;
     console.error = origErr;

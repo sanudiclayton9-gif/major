@@ -59,7 +59,7 @@ ${catalog || "(no products listed yet)"}`;
     // Model id is passed through a widening cast so this compiles even if the
     // installed @ai-sdk/google version's typed model union predates gemini-2.0-flash.
     const result = await streamText({
-      model: google("gemini-2.0-flash" as never),
+      model: google("gemini-3.6-flash" as never),
       system: systemPrompt,
       messages: messages as CoreMessage[],
     });
