@@ -42,9 +42,12 @@ export async function POST(req: NextRequest) {
     return new NextResponse("OK", { status: 200 });
   }
 
-  if (pollResult.paid()) {
+  const paid = typeof pollResult?.paid === "function" ? pollResult.paid() : Boolean(pollResult?.paid || pollResult?.status === "paid");
+  const statusStr = typeof pollResult?.status === "string" ? pollResult.status : undefined;
+
+  if (paid) {
     await supabaseAdmin.from("orders").update({ status: "paid" }).eq("id", order.id);
-  } else if (pollResult.status === "cancelled" || pollResult.status === "failed") {
+  } else if (statusStr === "cancelled" || statusStr === "failed" || pollResult?.status === "cancelled" || pollResult?.status === "failed") {
     await supabaseAdmin.from("orders").update({ status: "cancelled" }).eq("id", order.id);
   }
 

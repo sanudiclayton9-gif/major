@@ -40,7 +40,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ status: "pending" });
   }
 
-  if (pollResult.paid()) {
+  // Support multiple SDK return shapes: older SDKs return an object with
+  // a `.paid()` method; newer ones may return a plain object with a
+  // `paid` boolean or `status` string. Handle both safely.
+  const paid = typeof pollResult?.paid === "function" ? pollResult.paid() : Boolean(pollResult?.paid || pollResult?.status === "paid");
+  const statusStr = typeof pollResult?.status === "string" ? pollResult.status : undefined;
+
+  if (paid) {
     await supabaseAdmin.from("orders").update({ status: "paid" }).eq("id", orderId);
 
     // Best-effort stock decrement - doesn't block the response if it fails.
@@ -61,7 +67,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ status: "paid" });
   }
 
-  if (pollResult.status === "cancelled" || pollResult.status === "failed") {
+  if (statusStr === "cancelled" || statusStr === "failed" || pollResult?.status === "cancelled" || pollResult?.status === "failed") {
     await supabaseAdmin.from("orders").update({ status: "cancelled" }).eq("id", orderId);
     return NextResponse.json({ status: "cancelled" });
   }
