@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { BUSINESS_NAME, waLink } from "@/lib/constants";
 
@@ -14,7 +14,7 @@ const STATUS_TEXT: Record<string, string> = {
 export default function TrackPage({ params }: { params: { id: string } }) {
   const [status, setStatus] = useState("pending");
   const [checking, setChecking] = useState(true);
-  const attemptsRef = React.useRef(0);
+  const attemptsRef = useRef(0);
   const maxAttempts = 40;
 
   useEffect(() => {
