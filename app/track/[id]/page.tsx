@@ -14,10 +14,11 @@ const STATUS_TEXT: Record<string, string> = {
 export default function TrackPage({ params }: { params: { id: string } }) {
   const [status, setStatus] = useState("pending");
   const [checking, setChecking] = useState(true);
+  const attemptsRef = React.useRef(0);
+  const maxAttempts = 40;
 
   useEffect(() => {
     let active = true;
-    let attempts = 0;
 
     async function poll() {
       try {
@@ -25,23 +26,45 @@ export default function TrackPage({ params }: { params: { id: string } }) {
         const data = await res.json();
         if (!active) return;
         if (data.status) setStatus(data.status);
+        attemptsRef.current++;
+
+        // continue polling only if the *latest* status is still pending
+        if (active && data.status === "pending" && attemptsRef.current < maxAttempts) {
+          setTimeout(poll, 4000);
+          return;
+        }
       } catch {
-        // ignore transient errors, keep polling
+        // ignore transient errors, keep polling until attempts exhausted
+        attemptsRef.current++;
+        if (active && attemptsRef.current < maxAttempts) {
+          setTimeout(poll, 4000);
+          return;
+        }
       }
-      attempts++;
-      if (active && status === "pending" && attempts < 40) {
-        setTimeout(poll, 4000);
-      } else {
-        setChecking(false);
-      }
+
+      if (active) setChecking(false);
     }
 
+    // reset attempts when order id changes
+    attemptsRef.current = 0;
     poll();
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
+
+  // manual check function (also used by UI button)
+  async function checkNow() {
+    setChecking(true);
+    try {
+      const res = await fetch(`/api/paynow/status?orderId=${params.id}`);
+      const data = await res.json();
+      if (data.status) setStatus(data.status);
+    } catch {
+      // ignore
+    }
+    setChecking(false);
+  }
 
   return (
     <>
@@ -65,10 +88,18 @@ export default function TrackPage({ params }: { params: { id: string } }) {
           <p className="text-ink-soft mb-6">{STATUS_TEXT[status] ?? "Checking status..."}</p>
 
           {status === "pending" && checking && (
-            <p className="text-sm text-ink-soft">
-              Enter your EcoCash PIN on your phone if you haven't already.
-              This page updates automatically.
-            </p>
+            <div>
+              <p className="text-sm text-ink-soft">
+                Enter your EcoCash PIN on your phone if you haven't already.
+                This page updates automatically.
+              </p>
+              <button
+                onClick={() => checkNow()}
+                className="mt-3 bg-wine text-white font-semibold px-4 py-2 rounded-full text-sm"
+              >
+                Check For Payment
+              </button>
+            </div>
           )}
 
           {status === "cancelled" && (
