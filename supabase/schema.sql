@@ -3,6 +3,7 @@
 create table if not exists products (
   id uuid primary key default gen_random_uuid(),
   name text not null,
+  category text,
   price numeric not null,
   stock integer not null default 0,
   sizes text[] default '{}',

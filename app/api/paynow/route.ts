@@ -24,13 +24,62 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const total = items.reduce((sum, i) => sum + i.price * i.qty, 0);
+  // 0. Re-price everything server-side. The client-supplied prices are never
+  // trusted: we look every requested product up in the database and rebuild the
+  // line items and total from the stored price, so a tampered payload cannot
+  // create an order (or a Paynow payment) for an arbitrary amount.
+  const requestedIds = [...new Set(items.map((i) => i.productId))];
+  const { data: productRows, error: productsError } = await supabaseAdmin
+    .from("products")
+    .select("id,name,price")
+    .in("id", requestedIds);
+
+  if (productsError) {
+    return NextResponse.json({ error: productsError.message }, { status: 500 });
+  }
+
+  const priceById = new Map(
+    (productRows ?? []).map((p: { id: string; price: number }) => [p.id, p.price])
+  );
+  const nameById = new Map(
+    (productRows ?? []).map((p: { id: string; name: string }) => [p.id, p.name])
+  );
+
+  if (priceById.size !== requestedIds.length) {
+    return NextResponse.json(
+      { error: "One or more products in your cart are no longer available." },
+      { status: 400 }
+    );
+  }
+
+  const pricedItems: OrderItem[] = [];
+  for (const item of items) {
+    const price = priceById.get(item.productId);
+    if (typeof price !== "number") {
+      return NextResponse.json(
+        { error: "One or more products in your cart are no longer available." },
+        { status: 400 }
+      );
+    }
+    pricedItems.push({
+      productId: item.productId,
+      name: nameById.get(item.productId) ?? item.name,
+      price,
+      size: item.size,
+      qty: item.qty,
+    });
+  }
+
+  const total = pricedItems.reduce((sum, i) => sum + i.price * i.qty, 0);
+  if (total <= 0) {
+    return NextResponse.json({ error: "Order total must be greater than zero" }, { status: 400 });
+  }
 
   // 1. Create the order first, status pending.
   const { data: order, error: orderError } = await supabaseAdmin
     .from("orders")
     .insert({
-      items,
+      items: pricedItems,
       total,
       status: "pending",
       customer_phone: customerPhone,
@@ -66,8 +115,15 @@ export async function POST(req: NextRequest) {
     normalizedPhone = `263${normalizedPhone.slice(1)}`;
   }
 
-  const payment = paynow.createPayment(order.id, `${originalPhone}@wearchimsol.co.zw`);
-  for (const item of items) {
+  // Cancel the order and return a user-facing 502. Used by every payment
+  // failure path so the order is never left dangling as "pending".
+  const failOrder = async (message: string) => {
+    await supabaseAdmin.from("orders").update({ status: "cancelled" }).eq("id", order.id);
+    return NextResponse.json({ error: message }, { status: 502 });
+  };
+
+  const payment = paynow.createPayment(order.id, `${normalizedPhone}@wearchimsol.co.zw`);
+  for (const item of pricedItems) {
     payment.add(`${item.name}${item.size ? ` (${item.size})` : ""}`, item.price * item.qty);
   }
 
@@ -79,7 +135,7 @@ export async function POST(req: NextRequest) {
       orderId: order.id,
       customerPhone: originalPhone,
       normalizedPhone,
-      items: items.map((i: any) => ({ name: i.name, qty: i.qty, price: i.price })),
+      items: pricedItems.map((i) => ({ name: i.name, qty: i.qty, price: i.price })),
       total,
       resultUrl: paynow.resultUrl,
       returnUrl: paynow.returnUrl,
@@ -92,34 +148,22 @@ export async function POST(req: NextRequest) {
     // callPaynow surfaces the error the SDK would otherwise swallow and turn
     // into `undefined`, so we can log and report the real reason.
     const response = await callPaynow("sendMobile", () =>
-      paynow.sendMobile(payment, customerPhone, "ecocash")
+      paynow.sendMobile(payment, normalizedPhone, "ecocash")
     );
 
     if (!response) {
       console.error("[paynow] sendMobile returned no response", {
         orderId: order.id,
-        customerPhone,
+        customerPhone: originalPhone,
       });
-      await supabaseAdmin.from("orders").update({ status: "cancelled" }).eq("id", order.id);
-      return NextResponse.json(
-        {
-          error:
-            "We couldn't start the payment. Please try again in a moment, or contact us on WhatsApp.",
-        },
-        { status: 502 }
+      return await failOrder(
+        "We couldn't start the payment. Please try again in a moment, or contact us on WhatsApp."
       );
     }
 
     if (!response.success) {
       console.error("[paynow] sendMobile rejected", { orderId: order.id, error: response.error });
-      await supabaseAdmin
-        .from("orders")
-        .update({ status: "cancelled" })
-        .eq("id", order.id);
-      return NextResponse.json(
-        { error: response.error || "Payment could not be started" },
-        { status: 502 }
-      );
+      return await failOrder(response.error || "Payment could not be started");
     }
 
     await supabaseAdmin
@@ -135,16 +179,8 @@ export async function POST(req: NextRequest) {
     // The real reason (DNS failure, timeout, HTTP 4xx/5xx, "Hashes do not
     // match!") is in this message now that callPaynow surfaces it.
     console.error("[paynow] sendMobile threw", { orderId: order.id, error: e?.message ?? e });
-    await supabaseAdmin
-      .from("orders")
-      .update({ status: "cancelled" })
-      .eq("id", order.id);
-    return NextResponse.json(
-      {
-        error:
-          "We couldn't reach Paynow. Please try again in a moment, or contact us on WhatsApp.",
-      },
-      { status: 502 }
+    return await failOrder(
+      "We couldn't reach Paynow. Please try again in a moment, or contact us on WhatsApp."
     );
   }
 }

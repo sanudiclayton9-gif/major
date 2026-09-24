@@ -6,6 +6,7 @@ export type Product = {
   sizes: string[];
   images: string[];
   description: string;
+  category?: string;
   created_at: string;
 };
 

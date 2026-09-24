@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { getProducts } from "@/lib/products";
 import ProductCard from "@/components/ProductCard";
+import Gallery from "@/components/Gallery";
+import GalleryCard from "@/components/GalleryCard";
 import ReviewForm from "@/components/ReviewForm";
 import { ADDRESS, BUSINESS_NAME, waLink } from "@/lib/constants";
 
@@ -67,17 +69,7 @@ export default async function Home() {
             <p className="text-ink-soft">Order directly online, or ask our assistant a question first.</p>
           </div>
 
-          {products.length === 0 ? (
-            <p className="text-center text-ink-soft py-16">
-              No designs yet — check back soon.
-            </p>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-              {products.map((p) => (
-                <ProductCard product={p} key={p.id} />
-              ))}
-            </div>
-          )}
+          <Gallery products={products} />
         </section>
 
         <section className="text-center py-16 px-6 border-t border-black/5">

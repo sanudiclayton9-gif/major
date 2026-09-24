@@ -58,6 +58,7 @@ function ProductsTab() {
   const [stock, setStock] = useState("");
   const [sizes, setSizes] = useState("");
   const [images, setImages] = useState("");
+  const [category, setCategory] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -90,6 +91,7 @@ function ProductsTab() {
         sizes: sizeList,
         images: imageList,
         description: description.trim(),
+        category: category || null,
       }),
     });
     if (res.ok) {
@@ -145,6 +147,20 @@ function ProductsTab() {
             className="rounded-lg px-3 py-2 bg-white/70 border border-black/10"
           />
         </div>
+        <div>
+          <label className="text-sm text-ink-soft mb-1 inline-block">Category</label>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="w-full rounded-lg px-3 py-2 bg-white/70 border border-black/10"
+          >
+            <option value="">Auto (choose by name)</option>
+            <option value="Menswear">Menswear</option>
+            <option value="Traditional attire">Traditional attire</option>
+            <option value="Corporate suits">Corporate suits</option>
+            <option value="Evening dress">Evening dress</option>
+          </select>
+        </div>
         <input
           placeholder="Sizes, comma separated (e.g. S, M, L)"
           value={sizes}
@@ -181,6 +197,11 @@ function ProductsTab() {
             <div className="flex-1">
               <p className="font-semibold">{p.name}</p>
               <p className="text-sm text-ink-soft">${p.price} · stock {p.stock}</p>
+              {p.category && (
+                <span className="inline-block mt-1 text-xs px-2 py-1 rounded-full bg-white/70 border border-black/10">
+                  {p.category}
+                </span>
+              )}
             </div>
             <button
               onClick={() => handleDelete(p.id)}

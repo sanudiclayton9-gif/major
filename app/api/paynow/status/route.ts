@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { callPaynow, getPaynow } from "@/lib/paynow";
+import { OrderItem } from "@/lib/types";
+
+/**
+ * The shapes Paynow's SDKs have returned across versions: older ones expose a
+ * `paid()` method, newer ones a plain `paid` boolean, and some attach a
+ * `status` string.
+ */
+type PollResult = {
+  paid?: boolean | (() => boolean);
+  status?: string;
+};
 
 export async function GET(req: NextRequest) {
   const orderId = req.nextUrl.searchParams.get("orderId");
@@ -27,12 +38,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ status: order.status });
   }
 
-  let pollResult;
+  let pollResult: PollResult | undefined;
   try {
     const paynow = getPaynow();
-    pollResult = await callPaynow("pollTransaction", () =>
+    pollResult = (await callPaynow("pollTransaction", () =>
       paynow.pollTransaction(order.paynow_poll_url)
-    );
+    )) as PollResult;
   } catch (e: any) {
     // Transient Paynow/credential problem - leave the order pending so the
     // customer's next poll (or the Paynow webhook) can resolve it.
@@ -43,14 +54,37 @@ export async function GET(req: NextRequest) {
   // Support multiple SDK return shapes: older SDKs return an object with
   // a `.paid()` method; newer ones may return a plain object with a
   // `paid` boolean or `status` string. Handle both safely.
-  const paid = typeof pollResult?.paid === "function" ? pollResult.paid() : Boolean(pollResult?.paid || pollResult?.status === "paid");
+  const paid =
+    typeof pollResult?.paid === "function"
+      ? pollResult.paid() === true
+      : pollResult?.paid === true || pollResult?.status === "paid";
   const statusStr = typeof pollResult?.status === "string" ? pollResult.status : undefined;
 
   if (paid) {
-    await supabaseAdmin.from("orders").update({ status: "paid" }).eq("id", orderId);
+    // Guard the paid transition: only the request that actually flips the order
+    // from 'pending' to 'paid' may decrement stock. A concurrent or repeated
+    // poll matches zero rows here and skips the decrement, so stock is never
+    // reduced twice for the same order.
+    const { data: transitioned, error: transitionError } = await supabaseAdmin
+      .from("orders")
+      .update({ status: "paid" })
+      .eq("id", orderId)
+      .eq("status", "pending")
+      .select("id");
+
+    if (transitionError) {
+      console.error("[paynow] could not mark order paid", { orderId, error: transitionError.message });
+      return NextResponse.json({ status: "pending" });
+    }
+
+    const wonRace = Array.isArray(transitioned) && transitioned.length > 0;
+    if (!wonRace) {
+      // Someone else already resolved this order; report the real status.
+      return NextResponse.json({ status: "paid" });
+    }
 
     // Best-effort stock decrement - doesn't block the response if it fails.
-    for (const item of order.items as any[]) {
+    for (const item of order.items as OrderItem[]) {
       const { data: product } = await supabaseAdmin
         .from("products")
         .select("stock")
@@ -67,7 +101,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ status: "paid" });
   }
 
-  if (statusStr === "cancelled" || statusStr === "failed" || pollResult?.status === "cancelled" || pollResult?.status === "failed") {
+  if (statusStr === "cancelled" || statusStr === "failed") {
     await supabaseAdmin.from("orders").update({ status: "cancelled" }).eq("id", orderId);
     return NextResponse.json({ status: "cancelled" });
   }

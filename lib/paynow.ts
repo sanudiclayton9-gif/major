@@ -77,32 +77,47 @@ if (process.env.PAYNOW_DEBUG === "1") {
  * makes a DNS failure, a timeout and a bad credential all look identical to the
  * caller. This wraps those calls so the actual failure is thrown to us instead
  * of being silently converted into `undefined`.
+ *
+ * Because the capture works by temporarily replacing the global `console`, only
+ * one invocation may run at a time. Concurrent requests would otherwise
+ * interleave: request B's output would land in request A's `captured` buffer and
+ * B would restore the real console out from under A. This chain serializes them.
  */
+let consoleCaptureQueue: Promise<unknown> = Promise.resolve();
+
 export async function callPaynow<T>(label: string, fn: () => Promise<T>): Promise<T> {
-  const originalError = console.error;
-  const originalLog = console.log;
-  let captured = "";
+  const run = async (): Promise<T> => {
+    const originalError = console.error;
+    const originalLog = console.log;
+    let captured = "";
 
-  const capture = (...args: any[]) => {
-    captured = args
-      .map((a) => (a instanceof Error ? `${a.name}: ${a.message}` : String(a)))
-      .join(" ");
-  };
-  // The SDK writes its real error with console.log; capture both to be safe.
-  console.error = capture;
-  console.log = capture;
+    const capture = (...args: any[]) => {
+      captured = args
+        .map((a) => (a instanceof Error ? `${a.name}: ${a.message}` : String(a)))
+        .join(" ");
+    };
+    // The SDK writes its real error with console.log; capture both to be safe.
+    console.error = capture;
+    console.log = capture;
 
-  try {
-    const result = await fn();
-    if (result === undefined || result === null) {
-      const reason = captured || "SDK returned no response";
-      throw new Error(`Paynow ${label} failed: ${reason}`);
+    try {
+      const result = await fn();
+      if (result === undefined || result === null) {
+        const reason = captured || "SDK returned no response";
+        throw new Error(`Paynow ${label} failed: ${reason}`);
+      }
+      return result;
+    } finally {
+      console.error = originalError;
+      console.log = originalLog;
     }
-    return result;
-  } finally {
-    console.error = originalError;
-    console.log = originalLog;
-  }
+  };
+
+  // Queue this capture behind any in-flight one, then let the next caller
+  // proceed regardless of whether this one resolved or threw.
+  const queued = consoleCaptureQueue.then(run, run);
+  consoleCaptureQueue = queued.catch(() => undefined);
+  return queued;
 }
 
 export function getPaynow(orderId?: string) {
